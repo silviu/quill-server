@@ -10,6 +10,7 @@
 #include <sys/select.h>
 #include <netdb.h>
 #include <errno.h>
+#include <ctime>
 
 #define BUF_SIZE 10
 
@@ -25,11 +26,22 @@ struct user_info {
 	string host;
 	string port;
 	state_t state;
+	time_t time;
 };
 
 map<int, user_info> user_map;
+fd_set all_fds;
 
+void prompt()
+{
+	cout << "server> "<<flush;
+}
 
+void perros(const char* s)
+{
+	perror(s);
+	prompt();
+}
 int readln(int fd, string & s);
 
 /** Creates a socket. Binds to a port.
@@ -66,7 +78,7 @@ int bind_thy_self(char* host, char* port)
 		int on = 1;
 		int rc = setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 		if ( rc == -1)
-			perror("setsockopt");
+			perros("setsockopt");
 
 		if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
 			break;                  /* Success */
@@ -81,10 +93,6 @@ int bind_thy_self(char* host, char* port)
 	return sfd;
 }
 
-void prompt()
-{
-	cout << "server> "<<flush;
-}
 
 void insert_fd(fd_set &s, int &fdmax, int fd)
 {
@@ -108,6 +116,8 @@ user_info* get_user_info(int fd)
 	ss << line;
 	ss >> user->name >> user->host >> user->port;
 	user->state = S_INIT;
+	time_t tm;
+	user->time = time(&tm);
 	/*cout << "DBG: read user data '" << line << "'" << endl;
 	cout << "DBG: -- name: " << user.name << " host: " << user.host
 		 << " port: " << user.port << endl;*/
@@ -121,7 +131,7 @@ int writeall(int fd, const char * buf, size_t len)
 	while (remaining) {
 		int rc = send(fd, buf, remaining, 0);
 		if (rc == -1) {
-			perror("send in writeall");
+			perros("send in writeall");
 			return -1;
 		}
 		buf += rc;
@@ -185,7 +195,7 @@ int send_user_list(int sfd)
 bool check_user(user_info* user)
 {
 	if (user == NULL){
-		perror("user = NULL in accept_new_client()");
+		perros("user = NULL in accept_new_client()");
 		return false;
 	}
 	if (!user_exists(*user)) {
@@ -206,7 +216,7 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 	socklen_t len = sizeof(addr);
 	connfd = accept(sfd, (sockaddr *)&addr, &len);
 	if (connfd == -1) {
-		perror("accept()");
+		perros("accept()");
 		return -1;
 	}
 	/**get user info "username host port" */
@@ -255,11 +265,11 @@ int readall(int fd, char * buf, size_t len)
 	while (remaining) {
 		int rc = recv(fd, buf, remaining, 0);
 		if (rc == -1) {
-			perror("recv in readall");
+			perros("recv in readall");
 			return -1;
 		}
 		if (rc == 0) {
-			perror("recv: unexpected socket shutdown");
+			perros("\nrecv: unexpected socket shutdown");
 			return -1;
 		}
 		buf += rc;
@@ -279,7 +289,7 @@ int read_to_char(int fd, string & dest, int needle)
 	while(!found) {
 		int rc = recv(fd, buf, BUF_SIZE, MSG_PEEK);
 		if (rc == -1) {
-			perror("recv peek");
+			perros("recv peek");
 			return -1;
 		}
 		buf[rc] = '\0';
@@ -316,7 +326,10 @@ void list_users()
 	map<int, user_info>::iterator it;
 	for (it = user_map.begin(), i = 0; it != user_map.end(); ++it, i++)
 		cout << "User #" << i << ": " << it->second.name << " "
-			 << it->second.host << " " << it->second.port << endl;
+			 << it->second.host << " " << it->second.port << " "
+			 << it->second.time << endl;
+	if (i == 0)
+		cout << "No users online." << endl;
 }
 
 
@@ -353,12 +366,12 @@ int run_command_from_client(int fd)
 		if (it->second.state == S_INIT) {
 			rc = send(fd, "ACK\n", 5, 0);
 			if (rc == -1) {
-				perror("ACK in run_command_from_client()");
+				perros("ACK in run_command_from_client()");
 				return -1;
 			}
 			rc = send_user_list(it->first);
 			if (rc == -1) {
-				perror("send_user_list() in run_command_from_client()");
+				perros("send_user_list() in run_command_from_client()");
 				return -1;
 			}
 			it->second.state = S_AUTH;
@@ -366,11 +379,24 @@ int run_command_from_client(int fd)
 		else {
 			rc = send_user_list(it->first);
 			if (rc == -1) {
-				perror("send_user_list() in run_command_from_client()");
+				perros("send_user_list() in run_command_from_client()");
 				return -1;
 			}
 		}
 	return rc;
+}
+
+void ping_users(time_t curr_time)
+{
+	map<int, user_info>::iterator it;
+	for (it = user_map.begin(); it != user_map.end(); ++it)
+		if (difftime(curr_time, it->second.time) > 5) {
+			close(it->first);
+			FD_CLR(it->first, &all_fds);
+			cout << "\n" << it->second.name << " is offline.\n" << flush;
+			prompt();
+			user_map.erase(it);
+		}
 }
 
 
@@ -390,14 +416,21 @@ int main(int argc, char** argv)
 		exit(EXIT_FAILURE);
 	}
     int fdmax = 0;
-	fd_set all_fds;
 	FD_ZERO(&all_fds);
     /* stdin is selectable */
 	insert_fd(all_fds, fdmax, STDIN_FILENO);
     /* the "listen" socket is added to the socket set */
 	insert_fd(all_fds, fdmax, sfd);
 	prompt();
+
+	time_t start_time, curr_time;
+	time(&start_time);
 	for(;;) {
+		time(&curr_time);
+		if (difftime(curr_time, start_time) > 4) {
+			ping_users(curr_time);
+			time(&start_time);
+		}
 		fd_set tmp_fds;
 		int selected_fds = 0;
 		copy_fdset(all_fds, tmp_fds);
@@ -405,7 +438,7 @@ int main(int argc, char** argv)
 		selected_fds = select(fdmax + 1, &tmp_fds, NULL, NULL, NULL);
 
 		if (selected_fds == -1) {
-			perror("ERROR in select");
+			perros("ERROR in select");
 			exit(EXIT_FAILURE);
 		}
 
