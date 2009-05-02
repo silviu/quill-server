@@ -15,16 +15,23 @@
 
 using namespace std;
 
-
+enum state_t {
+	S_INIT,
+	S_AUTH
+};
 struct user_info {
 	string name;
 	string host;
 	string port;
+	state_t state;
+	/** states:
+	 * INIT- client just connected,
+	 * user list has not been sent yet.
+	 */
 };
 
 
 map<int, user_info> user_map;
-map<int, user_info>::iterator it;
 
 
 int readln(int fd, string & s);
@@ -103,18 +110,90 @@ user_info* get_user_info(int fd)
 	}
 	ss << line;
 	ss >> user->name >> user->host >> user->port;
+	user->state = S_INIT;
 	/*cout << "DBG: read user data '" << line << "'" << endl;
 	cout << "DBG: -- name: " << user.name << " host: " << user.host
 		 << " port: " << user.port << endl;*/
 	return user;
 }
+/**
+ * writes len characters to the socket
+ */
+int writeall(int fd, const char * buf, size_t len)
+{
+	size_t remaining = len;
+	while (remaining) {
+		int rc = send(fd, buf, remaining, 0);
+		if (rc == -1) {
+			perror("send in writeall");
+			return -1;
+		}
+		buf += rc;
+		remaining -= rc;
+	}
+	return len;
+}
+
+int writeall(int fd, const string & str)
+{
+	return writeall(fd, str.c_str(), str.length());
+}
+
+int writeln(int fd, const string & s_)
+{
+	string s = s_;
+	size_t len = s.length();
+	string nl = "\n";
+	if (len == 0)
+		return writeall(fd, nl);
+
+	if (s[s.length()-1] != '\n')
+		s += "\n";
+
+	return writeall(fd, s);
+}
+
 
 bool user_exists(user_info user)
 {
+
+	map<int, user_info>::iterator it;
 	for (it = user_map.begin(); it != user_map.end(); ++it)
 		if (it->second.name == user.name)
 			return true;
 	return false;
+}
+
+int send_user_list(int sfd)
+{
+	 map<int, user_info>::iterator it;
+	 for (it = user_map.begin(); it != user_map.end(); ++it) {
+		 string to_send;
+		 to_send = it->second.name + " " +
+				   it->second.host + " " +
+				   it->second.port;
+		 int rc = writeln(sfd, to_send);
+		 if (rc == -1)
+			 return -1;
+	}
+	return 0;
+}
+
+bool check_user(user_info* user)
+{
+	if (user == NULL){
+		perror("user = NULL in accept_new_client()");
+		return false;
+	}
+	if (!user_exists(*user)) {
+		cout << "\n" << user->name << " is online." << flush;
+		prompt();
+		return true;
+	}
+	else {
+		return false;
+	}
+	return true;
 }
 
 int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
@@ -127,25 +206,26 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 		perror("accept()");
 		return -1;
 	}
-	//get user info "username host port"
+	/**get user info "username host port" */
 	user_info* user = new(user_info);
 	user = get_user_info(connfd);
-	if (user == NULL){
-		perror("user = NULL in accept_new_client()");
-		close(connfd);
-		return -1;
-	}
-	if (!user_exists(*user)) {
+
+	/**check if the user is correct
+	 * and add it's fd to the set. */
+	if (check_user(user)) {
+		/* add the fd to the set */
+		insert_fd(all_fds, fdmax, connfd);
+		/* add the user to the map */
 		user_map.insert(pair<int, user_info>(connfd, *user));
-		cout << "\n" << user->name << " is online." << flush;
-		prompt();
 	}
 	else {
+		/* the user is already in use,
+		 * so send a NACK to the client
+		 * and close the socket*/
+		send(connfd, "NACK\n", 6, 0);
 		close(connfd);
-		return -1;
 	}
 
-	insert_fd(all_fds, fdmax, connfd);
 	char host[NI_MAXHOST], serv[NI_MAXSERV];
 	int rc = getnameinfo( (sockaddr*) &addr, len, host, NI_MAXHOST, serv, NI_MAXSERV, NI_NUMERICSERV);
 	if (rc != 0) {
@@ -187,28 +267,6 @@ int readall(int fd, char * buf, size_t len)
 	return len;
 }
 
-/**
- * writes len characters to the socket
- */
-int writeall(int fd, const char * buf, size_t len)
-{
-	size_t remaining = len;
-	while (remaining) {
-		int rc = send(fd, buf, remaining, 0);
-		if (rc == -1) {
-			perror("send in writeall");
-			return -1;
-		}
-		buf += rc;
-		remaining -= rc;
-	}
-	return len;
-}
-
-int writeall(int fd, const string & str)
-{
-	return writeall(fd, str.c_str(), str.length());
-}
 
 /**
  * adds characters to 'dest' until needle is found (inclusive)
@@ -249,23 +307,12 @@ int readln(int fd, string & dest)
 	return read_to_char(fd, dest, '\n');
 }
 
-int writeln(int fd, const string & s_)
-{
-	string s = s_;
-	size_t len = s.length();
-	if (len == 0)
-		return writeall(fd, "\n");
-
-	if (s[s.length()-1] != '\n')
-		s += "\n";
-
-	return writeall(fd, s);
-}
 
 
 void list_users()
 {
 	int i;
+	map<int, user_info>::iterator it;
 	for (it = user_map.begin(), i = 0; it != user_map.end(); ++it, i++)
 		cout << "User #" << i << ": " << it->second.name << " "
 			 << it->second.host << " " << it->second.port << endl;
@@ -290,15 +337,26 @@ int run_command_from_user(int sfd)
 int run_command_from_client(int fd)
 {
 	string line;
+	map<int, user_info>::iterator it;
 	int rc = readln(fd, line);
 	if (rc == -1) {
 		return -1;
 		//TODO: XXX: remove fd from the select() set
 	}
 	//cout << "DBG  :: read '" << line << "' from user" << endl;
-    rc = writeln(fd, line);
+    //rc = writeln(fd, line);
+	rc = 0;
+	for (it = user_map.begin(); it != user_map.end(); ++it)
+		if (it->second.state == S_INIT) {
+			send(fd, "ACK\n", 5, 0);
+			rc = send_user_list(it->first);
+			it->second.state = S_AUTH;
+		}
+		else
+			rc = send_user_list(it->first);
 	return rc;
 }
+
 
 int main(int argc, char** argv)
 {
@@ -307,7 +365,6 @@ int main(int argc, char** argv)
 		fprintf(stderr, "ERR--------->Usage: %s port\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
-	
 	sfd = bind_thy_self(NULL, argv[1]);
 
 	lst = listen(sfd, 10);
