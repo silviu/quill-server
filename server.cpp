@@ -341,19 +341,28 @@ int run_command_from_client(int fd)
 	int rc = readln(fd, line);
 	if (rc == -1) {
 		return -1;
-		//TODO: XXX: remove fd from the select() set
 	}
-	//cout << "DBG  :: read '" << line << "' from user" << endl;
-    //rc = writeln(fd, line);
-	rc = 0;
 	for (it = user_map.begin(); it != user_map.end(); ++it)
 		if (it->second.state == S_INIT) {
-			send(fd, "ACK\n", 5, 0);
+			rc = send(fd, "ACK\n", 5, 0);
+			if (rc == -1) {
+				perror("ACK in run_command_from_client()");
+				return -1;
+			}
 			rc = send_user_list(it->first);
+			if (rc == -1) {
+				perror("send_user_list() in run_command_from_client()");
+				return -1;
+			}
 			it->second.state = S_AUTH;
 		}
-		else
+		else {
 			rc = send_user_list(it->first);
+			if (rc == -1) {
+				perror("send_user_list() in run_command_from_client()");
+				return -1;
+			}
+		}
 	return rc;
 }
 
@@ -402,7 +411,11 @@ int main(int argc, char** argv)
 			} else if (fd == STDIN_FILENO) {
 				run_command_from_user(sfd);
 			} else {
-				run_command_from_client(fd);
+				int rc = run_command_from_client(fd);
+				if (rc == -1) {
+					FD_CLR(fd, &all_fds);
+					close(fd);
+				}
 			}
 		}
 	}
