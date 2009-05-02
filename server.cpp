@@ -1,7 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <map>
 #include <string.h>
+#include <string>
 #include <iostream>
+#include <sstream>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/select.h>
@@ -11,6 +14,19 @@
 #define BUF_SIZE 10
 
 using namespace std;
+
+
+struct user_info {
+	string name;
+	string host;
+	string port;
+};
+
+
+map<int, user_info> user_map;
+
+
+int readln(int fd, string & s);
 
 /* Creates a socket. Binds to a port.
  * Returns a socket fd. */
@@ -59,18 +75,43 @@ void insert_fd(fd_set &s, int &fdmax, int fd)
 		fdmax = fd;
 	FD_SET(fd, &s);
 }
- 
+
+
+int get_user_info(int fd)
+{
+	string line;
+	stringstream ss(stringstream::in|stringstream::out);
+	user_info user;
+
+	int rc = readln(fd, line);
+	if (rc == -1) {
+		fprintf(stderr, "in get_user_info readln returned -1\n");
+		return -1;
+	}
+	ss << line;
+	ss >> user.name >> user.host >> user.port;
+	cout << "DBG: read user data '" << line << "'" << endl;
+	cout << "DBG: -- name: " << user.name << " host: " << user.host
+		 << " port: " << user.port << endl;
+	user_map.insert(pair<int, user_info>(fd, user));
+	return 0;
+}
+
+
 int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 {
-	int newsfd;
+	int connfd;
 	struct sockaddr_storage addr;
 	socklen_t len = sizeof(addr);
-	newsfd = accept(sfd, (sockaddr *)&addr, &len);
-	if (newsfd == -1) {
+	connfd = accept(sfd, (sockaddr *)&addr, &len);
+	if (connfd == -1) {
 		perror("accept()");
 		return -1;
 	}
-	insert_fd(all_fds, fdmax, newsfd);
+	//get user info "username host port"
+	get_user_info(connfd);
+
+	insert_fd(all_fds, fdmax, connfd);
 	char host[NI_MAXHOST], serv[NI_MAXSERV];
 	int rc = getnameinfo( (sockaddr*) &addr, len, host, NI_MAXHOST, serv, NI_MAXSERV, NI_NUMERICSERV);
 	if (rc != 0) {
@@ -81,19 +122,6 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 	return 0;
 }
 
-int run_command_from_user()
-{
-	return 0;
-}
-
-int run_command_from_client(int fd)
-{
-	char buf[BUF_SIZE];
-	read(fd, &buf, BUF_SIZE);
-	write(fd, &buf, BUF_SIZE);
-	return 0;
-}
-
 
 void copy_fdset(fd_set &source, fd_set &dest)
 {
@@ -101,19 +129,124 @@ void copy_fdset(fd_set &source, fd_set &dest)
 }
 
 
-int readln(int fd)
+/**
+ * reads len characters from the socket into buf.
+ * if the socket gets shutdown or a socket error occurs, return -1
+ * else return len
+ */
+int readall(int fd, char * buf, size_t len)
 {
-	char* buf = (char*) malloc(sizeof(char) * BUF_SIZE);
-	for(;;) {
-		recv(fd, &buf, BUF_SIZE, MSG_PEEK);
-		for (int i = 0; i < BUF_SIZE; i++)
-			if ( buf[i] == '\n') {
-				recv(fd, &buf, i, NULL);
-				return i;
-			}
+	size_t remaining = len;
+	while (remaining) {
+		int rc = recv(fd, buf, remaining, 0);
+		if (rc == -1) {
+			perror("recv in readall");
+			return -1;
+		}
+		if (rc == 0) {
+			perror("recv: unexpected socket shutdown");
+			return -1;
+		}
+		buf += rc;
+		remaining -= rc;
 	}
+	return len;
 }
 
+/**
+ * writes len characters to the socket
+ */
+int writeall(int fd, const char * buf, size_t len)
+{
+	size_t remaining = len;
+	while (remaining) {
+		int rc = send(fd, buf, remaining, 0);
+		if (rc == -1) {
+			perror("send in writeall");
+			return -1;
+		}
+		buf += rc;
+		remaining -= rc;
+	}
+	return len;
+}
+
+int writeall(int fd, const string & str)
+{
+	return writeall(fd, str.c_str(), str.length());
+}
+
+/**
+ * adds characters to 'dest' until needle is found (inclusive)
+ */
+int read_to_char(int fd, string & dest, int needle)
+{
+	char buf[BUF_SIZE+1];
+	bool found = false;
+	while(!found) {
+		int rc = recv(fd, buf, BUF_SIZE, MSG_PEEK);
+		if (rc == -1) {
+			perror("recv peek");
+			return -1;
+		}
+		buf[rc] = '\0';
+		cout << "READ  " << rc << " chars :: " << buf << endl;
+		char* pos = (char*) memchr(buf, needle, BUF_SIZE);
+		int len = BUF_SIZE;
+		if (pos != NULL) {
+			len = pos - buf + 1;
+			found = true;
+		}
+
+		rc = readall(fd, buf, len);
+		if (rc == -1)
+			return -1;
+		dest.append(buf, rc);
+	}
+	return 0;
+}
+
+/**
+ * reads a line from the socket 
+ * (terminator == '\n', included in line)
+ */
+int readln(int fd, string & dest)
+{
+	return read_to_char(fd, dest, '\n');
+}
+
+int writeln(int fd, const string & s_)
+{
+	string s = s_;
+	size_t len = s.length();
+	if (len == 0)
+		return writeall(fd, "\n");
+
+	if (s[s.length()-1] != '\n')
+		s += "\n";
+
+	return writeall(fd, s);
+}
+
+int run_command_from_user()
+{
+	return 0;
+}
+
+int run_command_from_client(int fd)
+{
+	string line;
+	int rc = readln(fd, line);
+	if (rc == -1) {
+		return -1;
+		//TODO: XXX: remove fd from the select() set
+	}
+	cout << "DBG  :: read '" << line << "' from user" << endl;
+    rc = writeln(fd, line);
+	return rc;
+}
+
+ 
 int main(int argc, char** argv)
 {
 	int sfd, lst;
