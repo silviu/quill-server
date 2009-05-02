@@ -90,26 +90,32 @@ void insert_fd(fd_set &s, int &fdmax, int fd)
 }
 
 
-int get_user_info(int fd)
+user_info* get_user_info(int fd)
 {
 	string line;
 	stringstream ss(stringstream::in|stringstream::out);
-	user_info user;
+	user_info* user = new(user_info);
 
 	int rc = readln(fd, line);
 	if (rc == -1) {
 		fprintf(stderr, "in get_user_info readln returned -1\n");
-		return -1;
+		return NULL;
 	}
 	ss << line;
-	ss >> user.name >> user.host >> user.port;
+	ss >> user->name >> user->host >> user->port;
 	/*cout << "DBG: read user data '" << line << "'" << endl;
 	cout << "DBG: -- name: " << user.name << " host: " << user.host
 		 << " port: " << user.port << endl;*/
-	user_map.insert(pair<int, user_info>(fd, user));
-	return 0;
+	return user;
 }
 
+bool user_exists(user_info user)
+{
+	for (it = user_map.begin(); it != user_map.end(); ++it)
+		if (it->second.name == user.name)
+			return true;
+	return false;
+}
 
 int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 {
@@ -122,8 +128,22 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 		return -1;
 	}
 	//get user info "username host port"
-	get_user_info(connfd);
-	prompt();
+	user_info* user = new(user_info);
+	user = get_user_info(connfd);
+	if (user == NULL){
+		perror("user = NULL in accept_new_client()");
+		close(connfd);
+		return -1;
+	}
+	if (!user_exists(*user)) {
+		user_map.insert(pair<int, user_info>(connfd, *user));
+		cout << "\n" << user->name << " is online." << flush;
+		prompt();
+	}
+	else {
+		close(connfd);
+		return -1;
+	}
 
 	insert_fd(all_fds, fdmax, connfd);
 	char host[NI_MAXHOST], serv[NI_MAXSERV];
@@ -303,7 +323,7 @@ int main(int argc, char** argv)
 	insert_fd(all_fds, fdmax, STDIN_FILENO);
     /* the "listen" socket is added to the socket set */
 	insert_fd(all_fds, fdmax, sfd);
-
+	prompt();
 	for(;;) {
 		fd_set tmp_fds;
 		int selected_fds = 0;
