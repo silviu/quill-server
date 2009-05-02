@@ -24,6 +24,7 @@ struct user_info {
 
 
 map<int, user_info> user_map;
+map<int, user_info>::iterator it;
 
 
 int readln(int fd, string & s);
@@ -55,6 +56,13 @@ int bind_thy_self(char* host, char* port)
 		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 		if (sfd == -1)
 			continue;
+		/* Make the server override the 120 sec standard timeout
+		 * until it is allowed to reuse a certain port
+		 */
+		int on = 1;
+		int rc = setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+		if ( rc == -1)
+			perror("setsockopt");
 
 		if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
 			break;                  /* Success */
@@ -67,6 +75,11 @@ int bind_thy_self(char* host, char* port)
 	}
 	freeaddrinfo(result);           /* No longer needed */
 	return sfd;
+}
+
+void prompt()
+{
+	cout << "\nserver> ";
 }
 
 void insert_fd(fd_set &s, int &fdmax, int fd)
@@ -110,6 +123,7 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 	}
 	//get user info "username host port"
 	get_user_info(connfd);
+	prompt();
 
 	insert_fd(all_fds, fdmax, connfd);
 	char host[NI_MAXHOST], serv[NI_MAXSERV];
@@ -118,7 +132,7 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 		fprintf(stderr, "getnameinfo: %s\n", gai_strerror(rc));
 		return -1;
 	}
-	printf("new connection from: %s : %s\n", host, serv);
+	//printf("new connection from: %s : %s\n", host, serv);
 	return 0;
 }
 
@@ -228,8 +242,26 @@ int writeln(int fd, const string & s_)
 	return writeall(fd, s);
 }
 
-int run_command_from_user()
+
+void list_users()
 {
+	int i;
+	for (it = user_map.begin(), i = 0; it != user_map.end(); ++it, i++)
+		cout << "User #" << i << ": " << it->second.name << " "
+			 << it->second.host << " " << it->second.port<<endl;
+}
+
+
+int run_command_from_user(int sfd)
+{
+	string command;
+	getline(cin, command);
+	if( command == "list")
+		list_users();
+	if ( command == "quit") {
+		close(sfd);
+		exit(EXIT_SUCCESS);
+	}
 	return 0;
 }
 
@@ -246,7 +278,6 @@ int run_command_from_client(int fd)
 	return rc;
 }
 
- 
 int main(int argc, char** argv)
 {
 	int sfd, lst;
@@ -254,6 +285,7 @@ int main(int argc, char** argv)
 		fprintf(stderr, "ERR--------->Usage: %s port\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
+	
 	sfd = bind_thy_self(NULL, argv[1]);
 
 	lst = listen(sfd, 10);
@@ -266,7 +298,7 @@ int main(int argc, char** argv)
 	fd_set all_fds;
 	FD_ZERO(&all_fds);
     /* stdin is selectable */
-	insert_fd(all_fds, fdmax, 0);
+	insert_fd(all_fds, fdmax, STDIN_FILENO);
     /* the "listen" socket is added to the socket set */
 	insert_fd(all_fds, fdmax, sfd);
 
@@ -289,7 +321,7 @@ int main(int argc, char** argv)
 			if (fd == sfd) {
 				accept_new_client(sfd, all_fds, fdmax);
 			} else if (fd == STDIN_FILENO) {
-				run_command_from_user();
+				run_command_from_user(sfd);
 			} else {
 				run_command_from_client(fd);
 			}
