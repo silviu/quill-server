@@ -19,25 +19,22 @@ enum state_t {
 	S_INIT,
 	S_AUTH
 };
+
 struct user_info {
 	string name;
 	string host;
 	string port;
 	state_t state;
-	/** states:
-	 * INIT- client just connected,
-	 * user list has not been sent yet.
-	 */
 };
-
 
 map<int, user_info> user_map;
 
 
 int readln(int fd, string & s);
 
-/* Creates a socket. Binds to a port.
- * Returns a socket fd. */
+/** Creates a socket. Binds to a port.
+ * Returns a socket fd.
+ */
 int bind_thy_self(char* host, char* port)
 {
 	struct addrinfo hints;
@@ -63,7 +60,7 @@ int bind_thy_self(char* host, char* port)
 		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 		if (sfd == -1)
 			continue;
-		/* Make the server override the 120 sec standard timeout
+		/** Make the server override the 120 sec standard timeout
 		 * until it is allowed to reuse a certain port
 		 */
 		int on = 1;
@@ -86,7 +83,7 @@ int bind_thy_self(char* host, char* port)
 
 void prompt()
 {
-	cout << "\nserver> "<<flush;
+	cout << "server> "<<flush;
 }
 
 void insert_fd(fd_set &s, int &fdmax, int fd)
@@ -96,7 +93,7 @@ void insert_fd(fd_set &s, int &fdmax, int fd)
 	FD_SET(fd, &s);
 }
 
-
+/** Reads the username, host and port from the client */
 user_info* get_user_info(int fd)
 {
 	string line;
@@ -116,9 +113,8 @@ user_info* get_user_info(int fd)
 		 << " port: " << user.port << endl;*/
 	return user;
 }
-/**
- * writes len characters to the socket
- */
+
+/** Writes len characters to the socket. */
 int writeall(int fd, const char * buf, size_t len)
 {
 	size_t remaining = len;
@@ -133,12 +129,17 @@ int writeall(int fd, const char * buf, size_t len)
 	}
 	return len;
 }
-
+/** Same as above, but accepts a "string" in place
+ * of a "char*" as an argument.
+ */
 int writeall(int fd, const string & str)
 {
 	return writeall(fd, str.c_str(), str.length());
 }
 
+/** Appends a "\n" to the string that is to be sent.
+ * Calls "writeall" to send the created line to the client.
+ */
 int writeln(int fd, const string & s_)
 {
 	string s = s_;
@@ -153,7 +154,7 @@ int writeln(int fd, const string & s_)
 	return writeall(fd, s);
 }
 
-
+/** Checks if a user exists in the map */
 bool user_exists(user_info user)
 {
 
@@ -164,6 +165,7 @@ bool user_exists(user_info user)
 	return false;
 }
 
+/** Sends the userlist to all clients. */
 int send_user_list(int sfd)
 {
 	 map<int, user_info>::iterator it;
@@ -179,6 +181,7 @@ int send_user_list(int sfd)
 	return 0;
 }
 
+/** Checks if the username is to be accepted */
 bool check_user(user_info* user)
 {
 	if (user == NULL){
@@ -186,7 +189,7 @@ bool check_user(user_info* user)
 		return false;
 	}
 	if (!user_exists(*user)) {
-		cout << "\n" << user->name << " is online." << flush;
+		cout << "\n" << user->name << " is online.\n" << flush;
 		prompt();
 		return true;
 	}
@@ -232,10 +235,8 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 		fprintf(stderr, "getnameinfo: %s\n", gai_strerror(rc));
 		return -1;
 	}
-	//printf("new connection from: %s : %s\n", host, serv);
 	return 0;
 }
-
 
 void copy_fdset(fd_set &source, fd_set &dest)
 {
@@ -308,7 +309,7 @@ int readln(int fd, string & dest)
 }
 
 
-
+/** Prints the userlist to the server console. */
 void list_users()
 {
 	int i;
@@ -323,13 +324,19 @@ int run_command_from_user(int sfd)
 {
 	string command;
 	getline(cin, command);
-	if( command == "list") {
+	if (command == "")
+		prompt();
+	else if (command == "list") {
 		list_users();
 		prompt();
 	}
-	if ( command == "quit") {
+	else if (command == "quit") {
 		close(sfd);
 		exit(EXIT_SUCCESS);
+	}
+	else {
+		cout << command << ": command not found" << endl;
+		prompt();
 	}
 	return 0;
 }
