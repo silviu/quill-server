@@ -79,7 +79,7 @@ int bind_thy_self(char* host, char* port)
 
 void prompt()
 {
-	cout << "\nserver> ";
+	cout << "\nserver> "<<flush;
 }
 
 void insert_fd(fd_set &s, int &fdmax, int fd)
@@ -103,9 +103,9 @@ int get_user_info(int fd)
 	}
 	ss << line;
 	ss >> user.name >> user.host >> user.port;
-	cout << "DBG: read user data '" << line << "'" << endl;
+	/*cout << "DBG: read user data '" << line << "'" << endl;
 	cout << "DBG: -- name: " << user.name << " host: " << user.host
-		 << " port: " << user.port << endl;
+		 << " port: " << user.port << endl;*/
 	user_map.insert(pair<int, user_info>(fd, user));
 	return 0;
 }
@@ -204,7 +204,7 @@ int read_to_char(int fd, string & dest, int needle)
 			return -1;
 		}
 		buf[rc] = '\0';
-		cout << "READ  " << rc << " chars :: " << buf << endl;
+		//cout << "READ  " << rc << " chars :: " << buf << endl;
 		char* pos = (char*) memchr(buf, needle, BUF_SIZE);
 		int len = BUF_SIZE;
 		if (pos != NULL) {
@@ -248,7 +248,7 @@ void list_users()
 	int i;
 	for (it = user_map.begin(), i = 0; it != user_map.end(); ++it, i++)
 		cout << "User #" << i << ": " << it->second.name << " "
-			 << it->second.host << " " << it->second.port<<endl;
+			 << it->second.host << " " << it->second.port << endl;
 }
 
 
@@ -256,8 +256,10 @@ int run_command_from_user(int sfd)
 {
 	string command;
 	getline(cin, command);
-	if( command == "list")
+	if( command == "list") {
 		list_users();
+		prompt();
+	}
 	if ( command == "quit") {
 		close(sfd);
 		exit(EXIT_SUCCESS);
@@ -273,7 +275,7 @@ int run_command_from_client(int fd)
 		return -1;
 		//TODO: XXX: remove fd from the select() set
 	}
-	cout << "DBG  :: read '" << line << "' from user" << endl;
+	//cout << "DBG  :: read '" << line << "' from user" << endl;
     rc = writeln(fd, line);
 	return rc;
 }
