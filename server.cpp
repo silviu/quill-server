@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <ctime>
 #include "common.h"
+
 #define BUF_SIZE 10
 #define PING_INTERVAL 4
 #define MAX_NO_RESPOND 4
@@ -254,7 +255,7 @@ int main(int argc, char** argv)
 		fprintf(stderr, "ERR--------->Usage: %s port\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
-	sfd = bind_thy_self(NULL, argv[1]);
+	sfd = connect_to(1, NULL, argv[1]);
 
 	lst = listen(sfd, 10);
 
@@ -308,3 +309,4 @@ int main(int argc, char** argv)
 	}
 	return 0;
 }
+

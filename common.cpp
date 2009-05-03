@@ -134,7 +134,7 @@ int writeln(int fd, const string & s_)
 /** Creates a socket. Binds to a port.
  * Returns a socket fd.
 */
-int bind_thy_self(char* host, char* port)
+int connect_to(int must_bind, char* host, char* port)
 {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
@@ -166,9 +166,15 @@ int bind_thy_self(char* host, char* port)
 		int rc = setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 		if ( rc == -1)
 			perros("setsockopt");
-
-		if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
-			break;                  /* Success */
+		
+        if (must_bind) {
+			if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
+				break;
+		}
+		else {
+			if (connect(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
+				break;
+		}
 
 		close(sfd);
 	}
