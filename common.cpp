@@ -22,6 +22,7 @@ void prompt()
 
 void perros(const char* s)
 {
+	cout << "\n" << flush;
 	perror(s);
 	prompt();
 }
@@ -54,7 +55,7 @@ int readall(int fd, char * buf, size_t len)
 			return -1;
 		}
 		if (rc == 0) {
-			perros("\nrecv: unexpected socket shutdown");
+			perros("recv: unexpected socket shutdown");
 			return -1;
 		}
 		buf += rc;

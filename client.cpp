@@ -13,7 +13,8 @@
 #include <ctime>
 #include <list>
 #include "common.h"
- 
+
+#define MAX_BACKLOG 10
 using namespace std;
 
 const char* prompt_line = "client> ";
@@ -65,6 +66,28 @@ int run_command_from_user(int fd)
 	}
 	return 0;
 }
+
+int bind_to_random_port(string &host, string & port)
+{    
+	struct sockaddr_storage addr;
+	socklen_t len = sizeof(addr);
+
+	int bfd = bind_to(NULL, "0");
+	int rc = getsockname(bfd, (sockaddr*)&addr, &len);
+	if (rc == -1) {
+		perros("getsockname in bind_to_random_port()");
+		return -1;
+	}
+	char addr_host[NI_MAXHOST], addr_serv[NI_MAXSERV];
+	rc = getnameinfo( (sockaddr*) &addr, len, addr_host, NI_MAXHOST, addr_serv, NI_MAXSERV, NI_NUMERICSERV|NI_NUMERICHOST);
+	if (rc != 0) {
+		fprintf(stderr, "getnameinfo: %s\n", gai_strerror(rc));
+		return -1;
+	}
+	host.assign(addr_host);
+	port.assign(addr_serv);
+	return bfd;
+}
  
 
 int main(int argc, char** argv)
@@ -74,12 +97,25 @@ int main(int argc, char** argv)
 		exit(EXIT_FAILURE);
 	}
 
+ 	string host, port;
+	int bfd = bind_to_random_port(host, port);
+	if (bfd == -1) {
+		perros("bind_to_random_port returned -1 in main");
+		return -1;
+	}
+
+	int rc = listen(bfd, MAX_BACKLOG);
+	if ( rc == -1) {
+		perros("listen in main");
+		return -1;
+	}
+
     char* name = argv[1];
-	char* host = argv[2];
-	char* port = argv[3];
+	char* server_host = argv[2];
+	char* server_port = argv[3];
 
 	/* Connect to the server. Get the dile descriptor. */
-	int cfd = connect_to(host, port);
+	int cfd = connect_to(server_host, server_port);
     
 	string to_send;
 	to_send.append(name); to_send.append(" ");
@@ -87,7 +123,7 @@ int main(int argc, char** argv)
 	to_send.append(port);
 
     /* Send user info to the server */
-	int rc = writeln(cfd, to_send);
+	rc = writeln(cfd, to_send);
 	if (rc == -1) {
 		perros("writeln in main");
 		close(cfd);
@@ -109,12 +145,16 @@ int main(int argc, char** argv)
 		close(cfd);
 		return -1;
 	}         
+
 	
+
 	int fdmax = 0;
 	FD_ZERO(&client_fds);
     /* stdin is selectable */
 	insert_fd(client_fds, fdmax, STDIN_FILENO);
     /* the "listen" socket is added to the socket set */
+	insert_fd(client_fds, fdmax, bfd);
+	/* the server connected fd is added to the socket set */
 	insert_fd(client_fds, fdmax, cfd);
 	prompt();
 	for(;;) {

@@ -16,6 +16,7 @@
 #define BUF_SIZE 10
 #define PING_INTERVAL 4
 #define MAX_NO_RESPOND 40000
+#define MAX_BACKLOG 10
 
 using namespace std;
 
@@ -38,11 +39,13 @@ map<int, user_info> user_map;
 fd_set all_fds;
 
 
+int update_users();
 void close_connection(int fd)
 {
 	close(fd);
 	FD_CLR(fd, &all_fds);
 	user_map.erase(user_map.find(fd));
+	update_users();
 }
  
 /** Reads the username, host and port from the client */
@@ -262,12 +265,9 @@ void ping_users(time_t curr_time, int max_no_respond)
 	map<int, user_info>::iterator it;
 	for (it = user_map.begin(); it != user_map.end(); ++it)
 		if (difftime(curr_time, it->second.time) > max_no_respond) {
-			close(it->first);
-			FD_CLR(it->first, &all_fds);
+			close_connection(it->first);
 			cout << "\n  -" << it->second.name << " is offline.\n" << flush;
 			prompt();
-			user_map.erase(it);
-			update_users();
 		}
 }
 
@@ -281,7 +281,7 @@ int main(int argc, char** argv)
 	}
 	sfd = bind_to(NULL, argv[1]);
 
-	lst = listen(sfd, 10);
+	lst = listen(sfd, MAX_BACKLOG);
 
 	if (lst != 0) {
 		fprintf(stderr, "Could not listen on speciffied socket\n");
