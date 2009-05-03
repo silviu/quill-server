@@ -20,20 +20,51 @@ using namespace std;
 const char* prompt_line = "client> ";
 
 fd_set client_fds;
-list<string> user_list;
 
-int respond_to_ping(int fd)
+struct user_info {
+	user_info(const string &h, const string &p) : host(h), port(p) {}
+	string host;
+	string port;
+};
+ 
+
+map<string, user_info> user_list;
+
+/*int respond_to_ping(int fd)
 {
 	return 0;
 }
+*/
 
 void list_users()
 {
 	int i;
-	list<string>::iterator it;
+	map<string, user_info>::iterator it;
 	for(it = user_list.begin(), i = 0; it != user_list.end(); ++it, i++)
-		cout << "User #" << i << ": " << *it << flush;
+		cout << "User #" << i << ": " << it->first << endl << flush;
 }
+
+int add_or_update_user(string user_bulk)
+{    
+	string h, p;
+	map<string, user_info>::iterator it;
+	stringstream ss(stringstream::in|stringstream::out);
+	string name;
+	ss << user_bulk;
+	ss >> name >> h >> p;
+	user_info* user = new user_info(h, p);
+	it = user_list.find(name);
+	if (it == user_list.end())
+		/* if the username is not in the map add it to the user_list */
+		user_list.insert(pair<string, user_info>(name, *user));
+		/*TODO: initiate connection with him */
+	else {
+		it->second.host = user->host;
+		it->second.port = user->port;
+	}
+	return 0;
+}
+
  
 int run_command_from_server(int fd)
 {
@@ -43,9 +74,29 @@ int run_command_from_server(int fd)
 		perros("readln in run_command_from_server()");
 		return -1;
 	}
-	user_list.push_back(line);
+    add_or_update_user(line);
 	return 0;	
 }
+
+string extract_command(string command)
+{
+	string::size_type poz = command.find("read", 0);
+	if ( poz != string::npos)
+		return "read";
+
+	poz = command.find("send", 0);
+	if ( poz != string::npos)
+		return "send";
+	return "unknown_command";	
+}
+
+/*int connect_to_user(int fd, string user_info)
+{
+     return 0;
+
+}
+*/
+
 int run_command_from_user(int fd)
 {
 	string command;
@@ -60,6 +111,11 @@ int run_command_from_user(int fd)
 		close(fd);
 		exit(EXIT_SUCCESS);
 	}
+	else if (extract_command(command) == "send") {
+		//connect_to_user(fd, command);
+		prompt();
+	}
+
 	else {
 		cout << command << ": command not found" << endl;
 		prompt();
@@ -145,8 +201,6 @@ int main(int argc, char** argv)
 		close(cfd);
 		return -1;
 	}         
-
-	
 
 	int fdmax = 0;
 	FD_ZERO(&client_fds);

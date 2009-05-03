@@ -148,7 +148,7 @@ int writeln(int fd, const string & s_)
 /** Creates a socket. Binds to a port.
  * Returns a socket fd.
 */
-static int connect_or_bind(int must_bind, char* host, char* port)
+static int connect_or_bind(int must_bind, const char* host, const char* port)
 {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
@@ -200,12 +200,12 @@ static int connect_or_bind(int must_bind, char* host, char* port)
 	return sfd;
 }
 
-int bind_to(char* host, char* serv)
+int bind_to(const char* host, const char* serv)
 {
 	return connect_or_bind(1, host, serv);
 }
 
-int connect_to(char* host, char* serv)
+int connect_to(const char* host, const char* serv)
 {
 	return connect_or_bind(0, host, serv);
 }

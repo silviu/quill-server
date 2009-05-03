@@ -28,6 +28,9 @@ enum state_t {
 };
 
 struct user_info {
+	user_info(string &n, const string &h, const string &p, time_t &t)
+		: name(n), host(h), port(p), state(S_INIT), time(t) {}
+	user_info() : name("<none>"), host("<none>"), port("-1"), state(S_INIT), time(0) {}
 	string name;
 	string host;
 	string port;
@@ -51,9 +54,8 @@ void close_connection(int fd)
 /** Reads the username, host and port from the client */
 user_info* get_user_info(int fd)
 {
-	string line;
+	string line, n, h, p;
 	stringstream ss(stringstream::in|stringstream::out);
-	user_info* user = new(user_info);
 
 	int rc = readln(fd, line);
 	if (rc == -1) {
@@ -62,13 +64,10 @@ user_info* get_user_info(int fd)
 		return NULL;
 	}
 	ss << line;
-	ss >> user->name >> user->host >> user->port;
-	user->state = S_INIT;
-	time_t tm;
-	user->time = time(&tm);
-	/*cout << "DBG: read user data '" << line << "'" << endl;
-	cout << "DBG: -- name: " << user.name << " host: " << user.host
-		 << " port: " << user.port << endl;*/
+	ss >> n >> h >> p;
+	time_t t = time(&t);
+
+	user_info* user = new user_info(n, h, p, t);
 	return user;
 }
 
@@ -144,7 +143,7 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 		return -1;
 	}
 	/**get user info "username host port" */
-	user_info* user = new(user_info);
+	user_info* user = new user_info();
 	user = get_user_info(connfd);
 
 	/**check if the user is correct
