@@ -1,14 +1,28 @@
-CFLAGS = -Wall -g
+CC = g++
+CFLAGS = -Wall -g -Wextra -Weffc++
+SERVER_PORT = 2222
+RUN_SERVER = ./server $(SERVER_PORT)
+RUN_CLIENT = ./client silviu localhost $(SERVER_PORT)
 
-all: build run
+all: build
 
-build:
-	g++ $(CFLAGS) server.cpp -o server
+build: server client
 
-run: build
-	./server 2222
+server: server.o common.o
+client: client.o common.o
+
+run_client: client
+	$(RUN_CLIENT)
+
+run_server: server
+	$(RUN_SERVER)
+
+dbg_server: server
+	gdb --args $(RUN_SERVER)
+dbg_client: client
+	gdb --args $(RUN_CLIENT)
 
 clean:
-	rm -f server *~ *.o
+	rm -f server client *~ *.o *.swp
 
-.PHONY: build clean run
+.PHONY: build all clean run_client run_server dbg_server dbg_client
