@@ -13,6 +13,8 @@
 #include <ctime>
 
 #define BUF_SIZE 10
+#define PING_INTERVAL 4
+#define MAX_NO_RESPOND 4
 
 using namespace std;
 
@@ -34,7 +36,7 @@ fd_set all_fds;
 
 void prompt()
 {
-	cout << "server> "<<flush;
+	cout << "server> "<< flush;
 }
 
 void perros(const char* s)
@@ -199,7 +201,7 @@ bool check_user(user_info* user)
 		return false;
 	}
 	if (!user_exists(*user)) {
-		cout << "\n" << user->name << " is online.\n" << flush;
+		cout << "\n  +" << user->name << " is online.\n" << flush;
 		prompt();
 		return true;
 	}
@@ -354,6 +356,17 @@ int run_command_from_user(int sfd)
 	return 0;
 }
 
+int update_users()
+{
+	int rc;
+	map<int, user_info>::iterator it;
+	for (it = user_map.begin(); it != user_map.end(); ++it)
+		rc = send_user_list(it->first);
+	if (rc == -1)
+		return -1;
+	return 0;
+}
+
 int run_command_from_client(int fd)
 {
 	string line;
@@ -386,16 +399,17 @@ int run_command_from_client(int fd)
 	return rc;
 }
 
-void ping_users(time_t curr_time)
+void ping_users(time_t curr_time, int max_no_respond)
 {
 	map<int, user_info>::iterator it;
 	for (it = user_map.begin(); it != user_map.end(); ++it)
-		if (difftime(curr_time, it->second.time) > 5) {
+		if (difftime(curr_time, it->second.time) > max_no_respond) {
 			close(it->first);
 			FD_CLR(it->first, &all_fds);
-			cout << "\n" << it->second.name << " is offline.\n" << flush;
+			cout << "\n  -" << it->second.name << " is offline.\n" << flush;
 			prompt();
 			user_map.erase(it);
+			update_users();
 		}
 }
 
@@ -427,8 +441,8 @@ int main(int argc, char** argv)
 	time(&start_time);
 	for(;;) {
 		time(&curr_time);
-		if (difftime(curr_time, start_time) > 4) {
-			ping_users(curr_time);
+		if (difftime(curr_time, start_time) > PING_INTERVAL) {
+			ping_users(curr_time, MAX_NO_RESPOND);
 			time(&start_time);
 		}
 		fd_set tmp_fds;
