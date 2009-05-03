@@ -15,10 +15,12 @@
 
 #define BUF_SIZE 10
 #define PING_INTERVAL 4
-#define MAX_NO_RESPOND 4
+#define MAX_NO_RESPOND 40000
 
 using namespace std;
+
 const char* prompt_line = "server> ";
+
 enum state_t {
 	S_INIT,
 	S_AUTH
@@ -35,13 +37,14 @@ struct user_info {
 map<int, user_info> user_map;
 fd_set all_fds;
 
-void insert_fd(fd_set &s, int &fdmax, int fd)
-{
-	if (fdmax < fd)
-		fdmax = fd;
-	FD_SET(fd, &s);
-}
 
+void close_connection(int fd)
+{
+	close(fd);
+	FD_CLR(fd, &all_fds);
+	user_map.erase(user_map.find(fd));
+}
+ 
 /** Reads the username, host and port from the client */
 user_info* get_user_info(int fd)
 {
@@ -51,7 +54,8 @@ user_info* get_user_info(int fd)
 
 	int rc = readln(fd, line);
 	if (rc == -1) {
-		fprintf(stderr, "in get_user_info readln returned -1\n");
+		perros("in get_user_info readln returned -1\n");
+		close_connection(fd);
 		return NULL;
 	}
 	ss << line;
@@ -86,8 +90,11 @@ int send_user_list(int sfd)
 				   it->second.host + " " +
 				   it->second.port;
 		 int rc = writeln(sfd, to_send);
-		 if (rc == -1)
+		 if (rc == -1) {
+			 perros("writeln in send_user_list()");
+			 close_connection(sfd);
 			 return -1;
+		 }
 	}
 	return 0;
 }
@@ -109,7 +116,20 @@ bool check_user(user_info* user)
 	}
 	return true;
 }
-
+int update_users()
+{
+	int rc;
+	map<int, user_info>::iterator it;
+	for (it = user_map.begin(); it != user_map.end(); ++it)
+		rc = send_user_list(it->first);
+	if (rc == -1){
+		perros("send_user_list in update_users()");
+		close_connection(it->first);
+		return -1;
+	}
+	return 0;
+}
+ 
 int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 {
 	int connfd;
@@ -131,13 +151,25 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 		insert_fd(all_fds, fdmax, connfd);
 		/* add the user to the map */
 		user_map.insert(pair<int, user_info>(connfd, *user));
+		int rc = writeln(connfd, "ACK");
+		if ( rc == -1) {
+			perros("writeln in accept_new_client()");
+			close_connection(connfd);
+			return -1;
+		}
+		update_users();
 	}
 	else {
 		/* the user is already in use,
 		 * so send a NACK to the client
 		 * and close the socket*/
-		send(connfd, "NACK\n", 6, 0);
-		close(connfd);
+		int rc = writeln(connfd, "NACK");
+		if ( rc == -1) {
+			perros("writeln in accept_new_client()");
+			close_connection(connfd);
+			return -1;
+		}
+		return -1;
 	}
 
 	char host[NI_MAXHOST], serv[NI_MAXSERV];
@@ -149,10 +181,6 @@ int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 	return 0;
 }
 
-void copy_fdset(fd_set &source, fd_set &dest)
-{
-	memcpy(&dest, &source, sizeof(struct addrinfo));
-}
 
 
 /** Prints the userlist to the server console. */
@@ -167,6 +195,7 @@ void list_users()
 	if (i == 0)
 		cout << "No users online." << endl;
 }
+
 
 
 int run_command_from_user(int sfd)
@@ -190,16 +219,6 @@ int run_command_from_user(int sfd)
 	return 0;
 }
 
-int update_users()
-{
-	int rc;
-	map<int, user_info>::iterator it;
-	for (it = user_map.begin(); it != user_map.end(); ++it)
-		rc = send_user_list(it->first);
-	if (rc == -1)
-		return -1;
-	return 0;
-}
 
 int run_command_from_client(int fd)
 {
@@ -207,18 +226,22 @@ int run_command_from_client(int fd)
 	map<int, user_info>::iterator it;
 	int rc = readln(fd, line);
 	if (rc == -1) {
+		perros("readln in run_command_from_client()");
+		close_connection(fd);
 		return -1;
 	}
 	for (it = user_map.begin(); it != user_map.end(); ++it)
 		if (it->second.state == S_INIT) {
-			rc = send(fd, "ACK\n", 5, 0);
+			rc = writeln(fd, "ACK");
 			if (rc == -1) {
 				perros("ACK in run_command_from_client()");
+				close_connection(fd);
 				return -1;
 			}
 			rc = send_user_list(it->first);
 			if (rc == -1) {
 				perros("send_user_list() in run_command_from_client()");
+				close_connection(fd);
 				return -1;
 			}
 			it->second.state = S_AUTH;
@@ -227,6 +250,7 @@ int run_command_from_client(int fd)
 			rc = send_user_list(it->first);
 			if (rc == -1) {
 				perros("send_user_list() in run_command_from_client()");
+				close_connection(fd);
 				return -1;
 			}
 		}
@@ -255,7 +279,7 @@ int main(int argc, char** argv)
 		fprintf(stderr, "ERR--------->Usage: %s port\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
-	sfd = connect_to(1, NULL, argv[1]);
+	sfd = bind_to(NULL, argv[1]);
 
 	lst = listen(sfd, 10);
 
@@ -295,16 +319,14 @@ int main(int argc, char** argv)
 				continue;
 			i++;
 			if (fd == sfd) {
-				accept_new_client(sfd, all_fds, fdmax);
+				int rc = accept_new_client(sfd, all_fds, fdmax);
+				if (rc == -1) {
+					perros("accept_new_client in main");
+				}
 			} else if (fd == STDIN_FILENO) {
 				run_command_from_user(sfd);
-			} else {
-				int rc = run_command_from_client(fd);
-				if (rc == -1) {
-					FD_CLR(fd, &all_fds);
-					close(fd);
-				}
-			}
+			} else
+				run_command_from_client(fd);
 		}
 	}
 	return 0;

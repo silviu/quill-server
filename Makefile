@@ -1,5 +1,5 @@
 CC = g++
-CFLAGS = -Wall -g -Wextra -Weffc++
+CXXFLAGS = -Wall -g -Wextra -Weffc++
 SERVER_PORT = 2222
 RUN_SERVER = ./server $(SERVER_PORT)
 RUN_CLIENT = ./client silviu localhost $(SERVER_PORT)

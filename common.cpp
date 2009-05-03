@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-//#include <map>
+#include <map>
 #include <string.h>
 #include <string>
 #include <iostream>
@@ -26,6 +26,19 @@ void perros(const char* s)
 	prompt();
 }
 
+void insert_fd(fd_set &s, int &fdmax, int fd)
+{
+	if (fdmax < fd)
+		fdmax = fd;
+	FD_SET(fd, &s);
+}
+
+void copy_fdset(fd_set &source, fd_set &dest)
+{
+	memcpy(&dest, &source, sizeof(struct addrinfo));
+}
+ 
+ 
 /**
  * reads len characters from the socket into buf.
  * if the socket gets shutdown or a socket error occurs, return -1
@@ -134,7 +147,7 @@ int writeln(int fd, const string & s_)
 /** Creates a socket. Binds to a port.
  * Returns a socket fd.
 */
-int connect_to(int must_bind, char* host, char* port)
+static int connect_or_bind(int must_bind, char* host, char* port)
 {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
@@ -185,4 +198,13 @@ int connect_to(int must_bind, char* host, char* port)
 	freeaddrinfo(result);           /* No longer needed */
 	return sfd;
 }
- 
+
+int bind_to(char* host, char* serv)
+{
+	return connect_or_bind(1, host, serv);
+}
+
+int connect_to(char* host, char* serv)
+{
+	return connect_or_bind(0, host, serv);
+}

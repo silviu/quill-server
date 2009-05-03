@@ -19,7 +19,9 @@ int writeall(int fd, const char * buf, size_t len);
 int writeall(int fd, const string & str);
 int writeln(int fd, const string & s_);
 
-int connect_to(int must_bind, char* host, char* port);
-
+int connect_to(char* host, char* port);
+int bind_to(char* host, char* port);
+void insert_fd(fd_set &s, int &fdmax, int fd);
+void copy_fdset(fd_set &source, fd_set &dest);
 #endif //COMMON_H__
 
