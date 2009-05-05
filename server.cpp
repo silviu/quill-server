@@ -17,7 +17,7 @@
 #define PING_INTERVAL 4
 #define MAX_NO_RESPOND 40000
 #define MAX_BACKLOG 10
-
+#define PING "<PING>"
 using namespace std;
 
 const char* prompt_line = "server> ";
@@ -109,7 +109,9 @@ bool check_user(user_info* user)
 		return false;
 	}
 	if (!user_exists(*user)) {
-		cout << "\n  +" << user->name << " is online.\n" << flush;
+		cout << "\nadd user:" << user->name << " " 
+							   << user->host << " " 
+							   << user->port << endl << flush;
 		prompt();
 		return true;
 	}
@@ -118,6 +120,10 @@ bool check_user(user_info* user)
 	}
 	return true;
 }
+
+/** Sends the current online user list to all users
+ * or closes the connection with those who do not responde
+ */
 int update_users()
 {
 	int rc;
@@ -131,7 +137,8 @@ int update_users()
 	}
 	return 0;
 }
- 
+
+/** Accepts a new connection from a client */
 int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 {
 	int connfd;
@@ -190,15 +197,16 @@ void list_users()
 {
 	int i;
 	map<int, user_info>::iterator it;
-	for (it = user_map.begin(), i = 0; it != user_map.end(); ++it, i++)
-		cout << "User #" << i << ": " << it->second.name << " "
-			 << it->second.host << " " << it->second.port << endl;
+	for (it = user_map.begin(); it != user_map.end(); ++it)
+		cout << it->second.name << " "
+			 << it->second.host << " "
+			 << it->second.port << endl;
 	if (i == 0)
 		cout << "No users online." << endl;
 }
 
 
-
+/** Runs commands from the user */
 int run_command_from_user(int sfd)
 {
 	string command;
@@ -220,31 +228,54 @@ int run_command_from_user(int sfd)
 	return 0;
 }
 
+/** Updates the time in the "user_info" "time" field */
+int update_ping_response(int fd)
+{
+	time_t t;
+	map<int, user_info>::iterator it;
+	it = user_map.find(fd);
+	if (it == user_map.end())
+		return -1;
+	it->second.time = time(&t);
+	return 0;
+}
+
 
 int run_command_from_client(int fd)
 {
-	string line;
+	string line, name;
 	map<int, user_info>::iterator it;
 	int rc = readln(fd, line);
 	if (rc == -1) {
+		it = user_map.find(fd);
+		if (it != user_map.end())
+			name = it->second.name;
+		cout << "\ndel user:" << name << endl << flush;
+		prompt();
 		perros("readln in run_command_from_client()");
 		close_connection(fd);
 		return -1;
 	}
+	if (line == "<RSP>")
+		update_ping_response(fd);
 	for (it = user_map.begin(); it != user_map.end(); ++it)
+		/** If the user is new */
 		if (it->second.state == S_INIT) {
+			/** Send the ACK */
 			rc = writeln(fd, "ACK");
 			if (rc == -1) {
 				perros("ACK in run_command_from_client()");
 				close_connection(fd);
 				return -1;
 			}
+			/** Send the user list */
 			rc = send_user_list(it->first);
 			if (rc == -1) {
 				perros("send_user_list() in run_command_from_client()");
 				close_connection(fd);
 				return -1;
 			}
+			/** Set the state to authentificated */
 			it->second.state = S_AUTH;
 		}
 		else {
@@ -258,12 +289,30 @@ int run_command_from_client(int fd)
 	return rc;
 }
 
-void ping_users(time_t curr_time, int max_no_respond)
+int ping_users()
+{
+    map<int, user_info>::iterator it;
+	for (it = user_map.begin(); it != user_map.end(); ++it) {
+		int rc = writeln(it->first, PING);
+		if (rc == -1) {
+			perros("writeln() in ping_users()");
+			return -1;
+		}
+	}
+	return 0;
+}
+
+
+/** Remove the users that have not responded to the ping */
+void remove_non_response(time_t curr_time, int max_no_respond)
 {
 	map<int, user_info>::iterator it;
 	for (it = user_map.begin(); it != user_map.end(); ++it)
 		if (difftime(curr_time, it->second.time) > max_no_respond) {
+			/** Close the socket */
 			close_connection(it->first);
+			/** Remove the socket from the fd_set */
+			FD_CLR(it->first, &all_fds);
 			cout << "\n  -" << it->second.name << " is offline.\n" << flush;
 			prompt();
 		}
@@ -286,10 +335,11 @@ int main(int argc, char** argv)
 		exit(EXIT_FAILURE);
 	}
     int fdmax = 0;
+	/** Initialize the set */
 	FD_ZERO(&all_fds);
-    /* stdin is selectable */
+    /** stdin is selectable */
 	insert_fd(all_fds, fdmax, STDIN_FILENO);
-    /* the "listen" socket is added to the socket set */
+    /** the "listen" socket is added to the socket set */
 	insert_fd(all_fds, fdmax, sfd);
 	prompt();
 
@@ -298,7 +348,8 @@ int main(int argc, char** argv)
 	for(;;) {
 		time(&curr_time);
 		if (difftime(curr_time, start_time) > PING_INTERVAL) {
-			ping_users(curr_time, MAX_NO_RESPOND);
+			ping_users();
+			remove_non_response(curr_time, start_time);
 			time(&start_time);
 		}
 		fd_set tmp_fds;

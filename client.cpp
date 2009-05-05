@@ -17,6 +17,10 @@
 
 #define MAX_BACKLOG 10
 #define PROTO_START_MSG "msg from "
+#define PING "<PING>\n"
+#define USR_CMD_MSG_COUNT 2
+#define USR_CMD_READ 1
+#define USR_CMD_SEND 3
 using namespace std;
 
 const char* prompt_line = "client> ";
@@ -35,16 +39,41 @@ struct user_info {
  
 map<string, user_info> user_list;
 
-
+/** List all the users */
 void list_users()
 {
 	int i;
 	map<string, user_info>::iterator it;
 	for(it = user_list.begin(), i = 0; it != user_list.end(); ++it, i++)
-		cout << "User #" << i << ": " << it->first << " " 
-			 << it->second.host <<  " " << it->second.port << " "<< it->second.fd << endl << flush;
+		cout << it->first << endl << flush;
 }
 
+/** Respond to the server ping */
+int respond_to_ping(int fd)
+{
+	int rc = writeln(fd, "<RSP>");
+	if (rc == -1) {
+		perros("writeln() in respond_to_ping()");
+		return -1;
+	}
+	return 0;
+}
+
+/** Updates a certain user's fd with the new_fd */
+int update_user_fd(string user, int new_fd)
+{
+	map<string, user_info>::iterator it;
+	it = user_list.find(user);
+	if (it->second.fd == -1 && it != user_list.end())
+		it->second.fd = new_fd;
+	return 0;
+}
+
+/** Checks if the user is already connected
+ * if not the connection is made and the message is sent.
+ * Otherwise the message is sent to the socket speciffied
+ * in the "user_info"
+ */
 int send_msg(user_info &user, string client_name, string msg)
 {   
     string to_send; 
@@ -52,27 +81,32 @@ int send_msg(user_info &user, string client_name, string msg)
 	secv.append(client_name);
 	to_send.append(secv);
 	to_send.append(" ");
-	to_send.append(msg);	
+	to_send.append(msg);
 
-	int connfd = 0;
+	int connfd;
 	if (user.fd == -1) {
 		connfd = connect_to(user.host.c_str(), user.port.c_str());
+		if (connfd == -1) {
+			perros("connect_to() in send_msg()");
+			return -1;
+		}
 		insert_fd(client_fds, fdmax, connfd);
+		user.fd = connfd;
 	}
 	else 
 		connfd = user.fd;
-	if (connfd == -1) {
-		perros("connect_to() in send_msg()");
-		return -1;
-	}
 	int rc = writeln(connfd, to_send);
 	if (rc == -1) {
 		perros("writeln() in send_msg()");
+		//remove_user(connfd)
 		return -1;
 	}
-	return 0;
+	return connfd;
 }
 
+/** Searches for a user in the map 
+ * and adds the message to it's message vector 
+ */
 int add_msg(string user, string msg)
 {
 	map<string, user_info>::iterator it;
@@ -82,6 +116,7 @@ int add_msg(string user, string msg)
 	return 0;
 }
 
+/** Reads a message from it's peer */
 int read_msg(int fd)
 {
 	string line, what, from, who, msg;
@@ -96,12 +131,24 @@ int read_msg(int fd)
 	if (what == "msg") {
 		char* mesaj = (char*) malloc(line.size() - (what.size() + from.size() + who.size()));
 		ss.getline(mesaj, (line.size() - (what.size() + from.size() + who.size())));
+		for(int i = 0; i < strlen(mesaj); i++) {
+            if (mesaj[i] == '\01')
+				mesaj[i] = '\n';
+		}
 		msg = string(mesaj);
+		msg.erase(0, 2);
+		msg.erase(msg.size()-2, 2);
+
 		add_msg(who, msg);
+		cout << "\nA fost primit mesaj din partea utilizatorului " 
+			 << who << "...." << endl << flush;
+		prompt();
+		update_user_fd(who, fd);
 	}
 	return 0;
 }
 
+/** Function for the simple "read" command */
 int print_msg_nr()
 {
 	map<string, user_info>::iterator it;
@@ -110,6 +157,9 @@ int print_msg_nr()
 	return 0;
 }
 
+/** Reads the user_list sent by the server and updates
+ * its local copy 
+ */
 int update_user_list(string user_bulk)
 {    
 	string h, p, name;
@@ -130,7 +180,7 @@ int update_user_list(string user_bulk)
 		/* if the username already was in the list, but the host/port changed */
 		it->second.host = user->host;
 		it->second.port = user->port;
-		//it->second.fd = -1;
+		it->second.fd = -1;
 	}
 	return 0;
 }
@@ -144,6 +194,13 @@ int run_command_from_server(int fd)
 		perros("readln in run_command_from_server()");
 		return -1;
 	}
+	if (line == PING) {
+		respond_to_ping(fd);
+		return 0;
+	}
+	if (line == "ACK\n")
+		return 0;
+
     update_user_list(line);
 	return 0;	
 }
@@ -155,16 +212,16 @@ int break_command(string command, int comm, string &name, int &no, string &msg)
 	stringstream ss(stringstream::in|stringstream::out);
 	ss << command;
 
-	if (comm == 1) { 
+	if (comm == USR_CMD_READ) { 
 		ss >> co >> name >> nr;
 		no = atoi(nr.c_str());
 		return 0;
 	}
-	if (comm == 2) {
+	if (comm == USR_CMD_MSG_COUNT) {
 		ss >> co;
 		return 0;
 	}
-	if (comm == 3) {
+	if (comm == USR_CMD_SEND) {
 		ss >> co >> name;
 		char* mesaj = (char*) malloc(command.size() - (name.size() + co.size()));
 		ss.getline(mesaj, (command.size() - (name.size() + co.size())));
@@ -185,16 +242,16 @@ user_info* get_info_for_user(const string & name)
 
 int get_command_type(string command)
 {
-	string comm, user, no, msg;
+	string comm, user, no;
 	stringstream ss (stringstream::in|stringstream::out);
 	ss << command;
 	ss >> comm >> user >> no;
 	if (comm == "read" && user != "" && no != "")
-		return 1;
+		return USR_CMD_READ;
 	else if (comm == "read" && user == "" && no == "")
-		return 2;
-	else if (comm == "send" && user != "" && no != "")
-		return 3;
+		return USR_CMD_MSG_COUNT;
+	else if (comm == "send" && user != "")
+		return USR_CMD_SEND;
 	return 0;
 }
 
@@ -207,16 +264,13 @@ int print_specific_msg(string name, int no)
 		perros("The username you entered does not exist.");
 		return -1;
 	}
-	if (no > it->second.msg.size()) {
+	if (no >= it->second.msg.size()) {
 		perros("message number requested bigger than available msgs number.");
 		return -1;
 	}
 	cout << it->second.msg[no] << endl;
 	
-    vector<string>::iterator v_it;
-	int i;
-	for (v_it = it->second.msg.begin(), i = 0; v_it != it->second.msg.end(), i < no; ++v_it, ++i) {}
-	it->second.msg.erase(v_it);
+	it->second.msg.erase(it->second.msg.begin() + no);
 
 	return 0;
 }
@@ -240,23 +294,29 @@ int run_command_from_user(int fd, string client_name)
 		int no;
 		int comm = get_command_type(command);
 		break_command(command, comm, name, no, msg);
-		
-		if (comm == 3) {
+		if (comm == USR_CMD_SEND) {
 			user_info* user = new user_info();
 			user = get_info_for_user(name);
+			string line;
+			do {
+				getline(cin, line);
+				if(!cin)
+					return -1;
+				msg.append("\01");
+				msg.append(line);
+			} while(line.compare(".")) ;
 			int rc = send_msg(*user, client_name, msg);
 			if (rc == -1) {
 				perros("send_msg() in run_command_from_user()");
 				return -1;
 			}
-			user->fd = rc;
 			prompt();
 		}
-		else if (comm == 2) {
+		else if (comm == USR_CMD_MSG_COUNT) {
 			print_msg_nr();
 			prompt();
 		}
-		else if (comm == 1) {
+		else if (comm == USR_CMD_READ) {
 			print_specific_msg(name, no - 1);
 			prompt();
 		}
@@ -344,7 +404,7 @@ int main(int argc, char** argv)
 		close(cfd);
 	}
 
-	/* Wait for the respnde ACK/NACK */
+	/* Wait for the response ACK/NACK */
 	string response;
 	rc = readln(cfd, response);
 
@@ -354,12 +414,13 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-	cout << response << flush;
-	if (response == "NACK") {
-		perror("Username already in use.\n");
+	if (response == "NACK\n") {
+		cout << "Autentificare nu a reusit... exista deja client cu numele \"" 
+			 << name << "\"" <<endl << flush;
 		close(cfd);
 		return -1;
-	}         
+	}
+	cout << "Autentificarea a reusit" << endl << flush;	
 
 	FD_ZERO(&client_fds);
     /* stdin is selectable */
@@ -386,7 +447,9 @@ int main(int argc, char** argv)
 				continue;
 			i++;
 			if (fd == cfd) {
-				run_command_from_server(cfd);
+				int rc = run_command_from_server(cfd);
+				if (rc == -1)
+					FD_CLR(cfd, &client_fds);
 			} else if (fd == STDIN_FILENO) {
 				run_command_from_user(fd, client_name);
 			}
@@ -394,7 +457,9 @@ int main(int argc, char** argv)
 				accept_new_peer(bfd, client_fds, fdmax);
 			}
 			else {
-				read_msg(fd);
+				int rc = read_msg(fd);
+				if (rc == -1)
+					FD_CLR(fd, &client_fds);
 			}
 		}
 	}

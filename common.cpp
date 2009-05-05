@@ -22,9 +22,9 @@ void prompt()
 
 void perros(const char* s)
 {
-	cout << "\n" << flush;
-	perror(s);
-	prompt();
+	//cout << "\n" << flush;
+	//perror(s);
+	//prompt();
 }
 
 void insert_fd(fd_set &s, int &fdmax, int fd)
