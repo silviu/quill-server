@@ -192,8 +192,7 @@ void list_users()
 	map<int, user_info>::iterator it;
 	for (it = user_map.begin(), i = 0; it != user_map.end(); ++it, i++)
 		cout << "User #" << i << ": " << it->second.name << " "
-			 << it->second.host << " " << it->second.port << " "
-			 << it->second.time << endl;
+			 << it->second.host << " " << it->second.port << endl;
 	if (i == 0)
 		cout << "No users online." << endl;
 }

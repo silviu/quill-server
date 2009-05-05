@@ -12,55 +12,125 @@
 #include <errno.h>
 #include <ctime>
 #include <list>
+#include <vector>
 #include "common.h"
 
 #define MAX_BACKLOG 10
+#define PROTO_START_MSG "msg from "
 using namespace std;
 
 const char* prompt_line = "client> ";
 
 fd_set client_fds;
+int fdmax = 0;
 
 struct user_info {
-	user_info(const string &h, const string &p) : host(h), port(p) {}
+	user_info(const string &h, const string &p, int &f) : host(h), port(p), fd(f) {}
+	user_info() : host("<none>"), port("-1"), fd(-1) {}
 	string host;
 	string port;
+	int fd;
+	vector<string> msg;
 };
  
-
 map<string, user_info> user_list;
 
-/*int respond_to_ping(int fd)
-{
-	return 0;
-}
-*/
 
 void list_users()
 {
 	int i;
 	map<string, user_info>::iterator it;
 	for(it = user_list.begin(), i = 0; it != user_list.end(); ++it, i++)
-		cout << "User #" << i << ": " << it->first << endl << flush;
+		cout << "User #" << i << ": " << it->first << " " 
+			 << it->second.host <<  " " << it->second.port << " "<< it->second.fd << endl << flush;
 }
 
-int add_or_update_user(string user_bulk)
+int send_msg(user_info &user, string client_name, string msg)
+{   
+    string to_send; 
+	string secv = PROTO_START_MSG;
+	secv.append(client_name);
+	to_send.append(secv);
+	to_send.append(" ");
+	to_send.append(msg);	
+
+	int connfd = 0;
+	if (user.fd == -1) {
+		connfd = connect_to(user.host.c_str(), user.port.c_str());
+		insert_fd(client_fds, fdmax, connfd);
+	}
+	else 
+		connfd = user.fd;
+	if (connfd == -1) {
+		perros("connect_to() in send_msg()");
+		return -1;
+	}
+	int rc = writeln(connfd, to_send);
+	if (rc == -1) {
+		perros("writeln() in send_msg()");
+		return -1;
+	}
+	return 0;
+}
+
+int add_msg(string user, string msg)
+{
+	map<string, user_info>::iterator it;
+	it = user_list.find(user);
+	if ( it != user_list.end())
+		it->second.msg.push_back(msg);
+	return 0;
+}
+
+int read_msg(int fd)
+{
+	string line, what, from, who, msg;
+	int rc = readln(fd, line);
+	if (rc == -1) {
+		perros("readln() in read_msg()");
+		return -1;
+	}
+	stringstream ss (stringstream::in|stringstream::out);
+	ss << line;
+	ss >> what >> from >> who;
+	if (what == "msg") {
+		char* mesaj = (char*) malloc(line.size() - (what.size() + from.size() + who.size()));
+		ss.getline(mesaj, (line.size() - (what.size() + from.size() + who.size())));
+		msg = string(mesaj);
+		add_msg(who, msg);
+	}
+	return 0;
+}
+
+int print_msg_nr()
+{
+	map<string, user_info>::iterator it;
+	for (it = user_list.begin(); it != user_list.end(); ++it)
+		cout << it->first << ": " << it->second.msg.size() << endl << flush;
+	return 0;
+}
+
+int update_user_list(string user_bulk)
 {    
-	string h, p;
+	string h, p, name;
 	map<string, user_info>::iterator it;
 	stringstream ss(stringstream::in|stringstream::out);
-	string name;
+
 	ss << user_bulk;
 	ss >> name >> h >> p;
-	user_info* user = new user_info(h, p);
+	int f = -1;
+
+	user_info* user = new user_info(h, p, f);
 	it = user_list.find(name);
+
 	if (it == user_list.end())
 		/* if the username is not in the map add it to the user_list */
 		user_list.insert(pair<string, user_info>(name, *user));
-		/*TODO: initiate connection with him */
-	else {
+	else if (( it->second.host != user->host ) || (it->second.port != user->port)) {
+		/* if the username already was in the list, but the host/port changed */
 		it->second.host = user->host;
 		it->second.port = user->port;
+		//it->second.fd = -1;
 	}
 	return 0;
 }
@@ -74,30 +144,84 @@ int run_command_from_server(int fd)
 		perros("readln in run_command_from_server()");
 		return -1;
 	}
-    add_or_update_user(line);
+    update_user_list(line);
 	return 0;	
 }
 
-string extract_command(string command)
-{
-	string::size_type poz = command.find("read", 0);
-	if ( poz != string::npos)
-		return "read";
 
-	poz = command.find("send", 0);
-	if ( poz != string::npos)
-		return "send";
-	return "unknown_command";	
+int break_command(string command, int comm, string &name, int &no, string &msg)
+{
+	string co, nr;
+	stringstream ss(stringstream::in|stringstream::out);
+	ss << command;
+
+	if (comm == 1) { 
+		ss >> co >> name >> nr;
+		no = atoi(nr.c_str());
+		return 0;
+	}
+	if (comm == 2) {
+		ss >> co;
+		return 0;
+	}
+	if (comm == 3) {
+		ss >> co >> name;
+		char* mesaj = (char*) malloc(command.size() - (name.size() + co.size()));
+		ss.getline(mesaj, (command.size() - (name.size() + co.size())));
+		msg = string(mesaj);
+	} 
+	return 0;
 }
 
-/*int connect_to_user(int fd, string user_info)
+
+user_info* get_info_for_user(const string & name)
 {
-     return 0;
-
+	map<string, user_info>::iterator it;
+	it = user_list.find(name);
+	if (it != user_list.end())
+		return &it->second;
+	return NULL;
 }
-*/
 
-int run_command_from_user(int fd)
+int get_command_type(string command)
+{
+	string comm, user, no, msg;
+	stringstream ss (stringstream::in|stringstream::out);
+	ss << command;
+	ss >> comm >> user >> no;
+	if (comm == "read" && user != "" && no != "")
+		return 1;
+	else if (comm == "read" && user == "" && no == "")
+		return 2;
+	else if (comm == "send" && user != "" && no != "")
+		return 3;
+	return 0;
+}
+
+
+int print_specific_msg(string name, int no)
+{
+	map<string, user_info>::iterator it;
+	it = user_list.find(name);
+	if ( it == user_list.end()) {
+		perros("The username you entered does not exist.");
+		return -1;
+	}
+	if (no > it->second.msg.size()) {
+		perros("message number requested bigger than available msgs number.");
+		return -1;
+	}
+	cout << it->second.msg[no] << endl;
+	
+    vector<string>::iterator v_it;
+	int i;
+	for (v_it = it->second.msg.begin(), i = 0; v_it != it->second.msg.end(), i < no; ++v_it, ++i) {}
+	it->second.msg.erase(v_it);
+
+	return 0;
+}
+
+int run_command_from_user(int fd, string client_name)
 {
 	string command;
 	getline(cin, command);
@@ -111,16 +235,51 @@ int run_command_from_user(int fd)
 		close(fd);
 		exit(EXIT_SUCCESS);
 	}
-	else if (extract_command(command) == "send") {
-		//connect_to_user(fd, command);
-		prompt();
-	}
-
 	else {
-		cout << command << ": command not found" << endl;
-		prompt();
+		string name, msg;
+		int no;
+		int comm = get_command_type(command);
+		break_command(command, comm, name, no, msg);
+		
+		if (comm == 3) {
+			user_info* user = new user_info();
+			user = get_info_for_user(name);
+			int rc = send_msg(*user, client_name, msg);
+			if (rc == -1) {
+				perros("send_msg() in run_command_from_user()");
+				return -1;
+			}
+			user->fd = rc;
+			prompt();
+		}
+		else if (comm == 2) {
+			print_msg_nr();
+			prompt();
+		}
+		else if (comm == 1) {
+			print_specific_msg(name, no - 1);
+			prompt();
+		}
+		else {
+			cout << command << ": command not found" << endl;
+			prompt();
+		}
 	}
 	return 0;
+}
+
+int accept_new_peer(int bfd, fd_set &client_fds, int &fdmax)
+{
+	int connfd;
+	struct sockaddr_storage addr;
+	socklen_t len = sizeof(addr);
+	connfd = accept(bfd, (sockaddr *)&addr, &len);
+	if (connfd == -1) {
+		perros("accept()");
+		return -1;
+	}
+	insert_fd(client_fds, fdmax, connfd);
+   return connfd;	
 }
 
 int bind_to_random_port(string &host, string & port)
@@ -169,7 +328,7 @@ int main(int argc, char** argv)
     char* name = argv[1];
 	char* server_host = argv[2];
 	char* server_port = argv[3];
-
+    string client_name = string(name);
 	/* Connect to the server. Get the dile descriptor. */
 	int cfd = connect_to(server_host, server_port);
     
@@ -202,7 +361,6 @@ int main(int argc, char** argv)
 		return -1;
 	}         
 
-	int fdmax = 0;
 	FD_ZERO(&client_fds);
     /* stdin is selectable */
 	insert_fd(client_fds, fdmax, STDIN_FILENO);
@@ -230,7 +388,13 @@ int main(int argc, char** argv)
 			if (fd == cfd) {
 				run_command_from_server(cfd);
 			} else if (fd == STDIN_FILENO) {
-				run_command_from_user(fd);
+				run_command_from_user(fd, client_name);
+			}
+			else if (fd == bfd) {
+				accept_new_peer(bfd, client_fds, fdmax);
+			}
+			else {
+				read_msg(fd);
 			}
 		}
 	}
