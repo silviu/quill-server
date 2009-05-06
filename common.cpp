@@ -11,6 +11,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include "common.h"
+#include "base64.h"
 
 using namespace std;
 #define BUF_SIZE 10
@@ -208,4 +209,28 @@ int bind_to(const char* host, const char* serv)
 int connect_to(const char* host, const char* serv)
 {
 	return connect_or_bind(0, host, serv);
+}
+
+int make_base64(const string &ascii, string &b_64)
+{
+	size_t b_64_len;
+	const unsigned char* ascii_c_str = (const unsigned char*) ascii.c_str();
+	char* b_64_c_str = (char*) base64_encode(ascii_c_str, ascii.length(), &b_64_len);
+	if (b_64_c_str == NULL)
+		return -1;
+	b_64.append(b_64_c_str, b_64_len);
+	free(b_64_c_str);
+	return 0;
+}
+
+int decode_base64(const string &b_64, string &ascii)
+{
+	size_t ascii_len;
+	const unsigned char* b_64_c_str = (const unsigned char*) b_64.c_str();
+	char* ascii_c_str= (char*) base64_decode(b_64_c_str, b_64.length(), &ascii_len);
+	if (ascii_c_str == NULL)
+		return -1;
+	ascii.append(ascii_c_str, ascii_len);
+	free(ascii_c_str);
+	return 0;
 }

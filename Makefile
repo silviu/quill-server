@@ -2,14 +2,15 @@ CC = g++
 CXXFLAGS = -Wall -g -Wextra -Weffc++
 SERVER_PORT = 2222
 RUN_SERVER = ./server $(SERVER_PORT)
-RUN_CLIENT = ./client silviu localhost $(SERVER_PORT)
+RUN_CLIENT = ./client silviu localhost $(SERVER_PORT) download
+
 
 all: build
 
 build: server client
 
-server: server.o common.o
-client: client.o common.o
+server: server.o common.o base64.o
+client: client.o common.o base64.o
 
 run_client: client
 	$(RUN_CLIENT)

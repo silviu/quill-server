@@ -23,5 +23,8 @@ int connect_to(const char* host, const char* port);
 int bind_to(const char* host, const char* port);
 void insert_fd(fd_set &s, int &fdmax, int fd);
 void copy_fdset(fd_set &source, fd_set &dest);
+
+int make_base64(const string &ascii, string &b_64);
+int decode_base64(const string &b_64, string &ascii);
 #endif //COMMON_H__
 
