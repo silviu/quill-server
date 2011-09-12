@@ -171,7 +171,7 @@ static int connect_or_bind(int must_bind, const char* host, const char* port)
 		exit(EXIT_FAILURE);
 	}
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		sfd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sfd == -1)
 			continue;
 		/** Make the server override the 120 sec standard timeout
@@ -194,7 +194,7 @@ static int connect_or_bind(int must_bind, const char* host, const char* port)
 		close(sfd);
 	}
 	if (rp == NULL) {               /* No address succeeded */
-		fprintf(stderr, "Could not bind\n");
+		fprintf(stderr, "Could not bind. HOST=[%s] -- PORT=[%s]\n", host, port);
 		exit(EXIT_FAILURE);
 	}
 	freeaddrinfo(result);           /* No longer needed */

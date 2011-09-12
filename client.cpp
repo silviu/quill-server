@@ -86,7 +86,7 @@ int send_msg_or_file(user_info &user, string client_name,
 {
 
     string to_send, msg_start;
-	for (int i = 0; i < msg.length(); i++)
+	for (unsigned int i = 0; i < msg.length(); i++)
 		if (msg[i] == '\n')
 			msg[i] = '\01'; 
 	if (what == PROTO_START_MSG)
@@ -163,7 +163,7 @@ int read_msg(int fd)
 	if (what == "msg") {
 		char* mesaj = (char*) malloc(line.size() - (what.size() + from.size() + who.size()));
 		ss.getline(mesaj, (line.size() - (what.size() + from.size() + who.size())));
-		for(int i = 0; i < strlen(mesaj); i++) {
+		for(unsigned int i = 0; i < strlen(mesaj); i++) {
             if (mesaj[i] == '\01')
 				mesaj[i] = '\n';
 		}
@@ -183,7 +183,7 @@ int read_msg(int fd)
 		string file;
 		char* fisier = (char*) malloc(line.size() - (what.size() + from.size() + who.size()));
 		ss.getline(fisier, (line.size() - (what.size() + from.size() + who.size())));
-		for(int i = 0; i < strlen(fisier); i++) {
+		for(unsigned int i = 0; i < strlen(fisier); i++) {
 			if (fisier[i] == '\01')
 				fisier[i] = '\n';
 		}
@@ -339,7 +339,7 @@ int print_specific_msg(string name, int no)
 		perros("The username you entered does not exist.");
 		return -1;
 	}
-	if (no >= it->second.msg.size()) {
+	if ((unsigned int) no >= it->second.msg.size()) {
 		perros("message number requested bigger than available msgs number.");
 		return -1;
 	}
@@ -355,13 +355,7 @@ int file_to_string(string name, string &file, string &filename)
 	FILE *fp;
 	long len;
 	char *buf;
-	//int file_name_index = name.find_last_of("/");
-	//if (file_name_index == string::npos)
-	//	filename = name;
-	//else
-		//for (int i = file_name_index; i < name.length(); i++)
-		  //  filename[i-file_name_index] = name[i];
-	char* filename_c = basename(name.c_str());
+	const char* filename_c = basename(name.c_str());
 	filename = string(filename_c);
 	file.append(filename);
 	file.append(" ");
@@ -377,6 +371,7 @@ int file_to_string(string name, string &file, string &filename)
 	fread(buf,len,1,fp); //read into buffer
     file.append(string(buf));
 	fclose(fp);
+	return 0;
 }
 
 int list_files()
@@ -417,7 +412,7 @@ int print_file (string username, string filename, string download_path)
 	map <string, user_info>::iterator it;
 	for (it = user_list.begin(); it != user_list.end(); ++it)
 		if (it->first == username)
-			for (int i = 0; i < it->second.flname.size(); i++)
+			for (unsigned int i = 0; i < it->second.flname.size(); i++)
 				if ( it->second.flname[i] == filename) {
 					write_to_disk(it->second.files[i], filename, download_path);
 					cout << it->second.files[i] << endl << flush;
@@ -547,7 +542,7 @@ int bind_to_random_port(string &host, string & port)
 
 int main(int argc, char** argv)
 {    
-	if (argc != 5) {
+	if (argc < 4) {
 		perror("main: Too few arguments. Usage: ./client username host port");
 		exit(EXIT_FAILURE);
 	}

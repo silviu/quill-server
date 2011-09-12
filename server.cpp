@@ -12,6 +12,9 @@
 #include <errno.h>
 #include <ctime>
 #include "common.h"
+#include <pthread.h>
+#include <arpa/inet.h>
+
 
 #define BUF_SIZE 10
 #define PING_INTERVAL 4
@@ -50,7 +53,7 @@ void close_connection(int fd)
 	user_map.erase(user_map.find(fd));
 	update_users();
 }
- 
+
 /** Reads the username, host and port from the client */
 user_info* get_user_info(int fd)
 {
@@ -138,21 +141,38 @@ int update_users()
 	return 0;
 }
 
+void* update_users_thread(void*)
+{
+	while (1) {
+		update_users();
+		sleep(1);
+	}
+	return NULL;
+}
+
 /** Accepts a new connection from a client */
 int accept_new_client(int sfd, fd_set &all_fds, int &fdmax)
 {
-	int connfd;
-	struct sockaddr_storage addr;
-	socklen_t len = sizeof(addr);
-	connfd = accept(sfd, (sockaddr *)&addr, &len);
-	if (connfd == -1) {
-		perros("accept()");
-		return -1;
-	}
-	/**get user info "username host port" */
+	struct sockaddr_in addr; /* socket info about the machine connecting to us */
+    int mysocket;            /* socket used to listen for incoming connections */
+    socklen_t len = sizeof(struct sockaddr_in);
+ 
+  
+    int connfd = accept(sfd, (struct sockaddr *)&addr, &len);
+    printf("Incoming connection from %s - %d sending welcome\n", inet_ntoa(addr.sin_addr), addr.sin_port);
+    char* extern_ip = inet_ntoa(addr.sin_addr);
 	user_info* user = new user_info();
-	user = get_user_info(connfd);
-
+	if (!strcmp(extern_ip, "127.0.0.1")) {
+		user = get_user_info(connfd);
+	}
+	else {
+		/**get user info "username host port" */
+		user = get_user_info(connfd);
+		user->host = string(extern_ip);
+		char buff[6];
+		sprintf(buff, "%d", addr.sin_port);
+		user->port = string(buff);
+	}
 	/**check if the user is correct
 	 * and add it's fd to the set. */
 	if (check_user(user)) {
@@ -322,11 +342,12 @@ void remove_non_response(time_t curr_time, int max_no_respond)
 int main(int argc, char** argv)
 {
 	int sfd, lst;
-	if (argc != 2) {
+	/*if (argc != 2) {
 		fprintf(stderr, "ERR--------->Usage: %s port\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
-	sfd = bind_to(NULL, argv[1]);
+	*/
+	sfd = bind_to(NULL, "2222");
 
 	lst = listen(sfd, MAX_BACKLOG);
 
@@ -342,6 +363,10 @@ int main(int argc, char** argv)
     /** the "listen" socket is added to the socket set */
 	insert_fd(all_fds, fdmax, sfd);
 	prompt();
+	
+	pthread_t tid;
+	pthread_create(&tid, NULL, &update_users_thread, NULL);
+
 
 	time_t start_time, curr_time;
 	time(&start_time);
